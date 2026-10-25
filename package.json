@@ -1,0 +1,16 @@
+{
+  "name": "kurumi-quant-simulator",
+  "version": "2.0.0",
+  "description": "基于量化多因子模型与A股控盘机制的股市模拟器",
+  "main": "quant-engine.js",
+  "scripts": {
+    "test": "node tests/quant-engine.test.js && node tests/simulation.test.js"
+  },
+  "keywords": [
+    "quantitative-trading",
+    "multi-factor",
+    "a-shares",
+    "simulation"
+  ],
+  "license": "MIT"
+}
