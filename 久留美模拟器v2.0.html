@@ -658,6 +658,22 @@
     border-color:rgba(255,92,108,.4);
     box-shadow:0 0 20px rgba(255,92,108,.15);
   }
+  .news-banner.blackswan.catastrophic{
+    background:linear-gradient(135deg,rgba(182,140,255,.22),rgba(255,92,108,.32),rgba(15,10,25,.8));
+    border-color:rgba(255,92,108,.85);
+    box-shadow:0 0 35px rgba(255,92,108,.4), inset 0 0 15px rgba(182,140,255,.25);
+    animation:pulseCatastrophic 2s infinite alternate ease-in-out;
+  }
+  @keyframes pulseCatastrophic{
+    0%{box-shadow:0 0 20px rgba(255,92,108,.3), inset 0 0 10px rgba(182,140,255,.15);border-color:rgba(255,92,108,.7)}
+    100%{box-shadow:0 0 45px rgba(255,92,108,.65), inset 0 0 25px rgba(182,140,255,.4);border-color:rgba(255,140,255,.95)}
+  }
+  .news-banner.blackswan.catastrophic .news-type-badge{
+    background:linear-gradient(90deg, #ff5c6c, #b68cff);
+    color:#fff;
+    border:1px solid #fff;
+    text-shadow:0 0 8px rgba(255,255,255,.8);
+  }
   .news-banner-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
   .news-time-badge{
     font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:4px;
@@ -687,6 +703,7 @@
     border:1px solid var(--line-soft);font-size:11px;
   }
   .news-history-item.blackswan{border-left:3px solid var(--up)}
+  .news-history-item.blackswan.catastrophic{border-left:4px solid #b68cff;background:rgba(255,92,108,.1)}
   .news-history-item-top{display:flex;align-items:center;gap:8px;margin-bottom:3px}
   .news-history-time{color:var(--gold);font-family:var(--mono);font-size:10px}
   .news-history-title{font-weight:600;color:var(--text)}
@@ -717,6 +734,7 @@
     border:1px solid var(--line-soft);font-size:11px;
   }
   .settle-event-item.blackswan{border-left:3px solid var(--up)}
+  .settle-event-item.blackswan.catastrophic{border-left:4px solid #b68cff;background:rgba(182,140,255,.08)}
   .settle-event-time{color:var(--muted);font-family:var(--mono);margin-right:6px}
   .settle-event-name{font-weight:600;color:var(--text)}
   .settle-empty{color:var(--faint);font-size:11px;font-style:italic}
@@ -1604,6 +1622,24 @@
       sentimentDelta: -22
     },
     {
+      id: "SWISS_FRANC_FLASH_CRASH",
+      name: "突发闪电弃守汇率平价底线（瑞郎式海啸）",
+      isBlackSwan: true,
+      category: "BLACK_SWAN",
+      severity: "CATASTROPHIC",
+      faction: FACTIONS.FOREIGN_CAPITAL,
+      probabilityWeight: 0.15,
+      triggerTimeWindow: { startHour: 10, startMin: 28, endHour: 10, endMin: 35 },
+      timeDesc: "早盘 10:30",
+      headlineTemplate: "【☠️ 史诗级黑天鹅 · 瑞郎式海啸】突发闪电撕毁平价底线承诺！全球百亿对冲基金瞬间穿仓倒闭，金融衍生品流动性彻底蒸发！",
+      detailTemplate: "{time}，海外核心央行在事前反复誓言兜底的背景下，毫无征兆突发宣布取消长期汇率平价承诺并实施深度负利率！全市场流动性在数十秒内彻底归零，买卖挂单断崖熔断。多家知名跨国百亿对冲基金净值直接归零清盘，头部券商遭遇毁灭性穿仓坏账。全市场流动性枯竭引发无差别核按钮踩踏，高杠杆多头遭遇毁灭性强平！",
+      marketShock: -0.065,
+      sectorMultiplier: 1.45,
+      volatilityMult: 4.0,
+      targetSector: "券商",
+      sentimentDelta: -55
+    },
+    {
       id: "NATIONAL_TEAM_INTERVENTION",
       name: "国家级平准基金千亿托底救市",
       isBlackSwan: false,
@@ -2371,9 +2407,10 @@
     const banner = $("newsBanner");
     const evt = S.todayEvent;
     if (evt){
-      banner.className = "news-banner" + (evt.isBlackSwan ? " blackswan" : " active-event");
+      const isCatastrophic = evt.severity === "CATASTROPHIC";
+      banner.className = "news-banner" + (evt.isBlackSwan ? " blackswan" : " active-event") + (isCatastrophic ? " catastrophic" : "");
       $("newsTimeBadge").textContent = evt.time;
-      $("newsTypeBadge").textContent = evt.isBlackSwan ? "🚨 突发黑天鹅" : "📢 重大要闻";
+      $("newsTypeBadge").textContent = isCatastrophic ? "☠️ 史诗灾难黑天鹅" : (evt.isBlackSwan ? "🚨 突发黑天鹅" : "📢 重大要闻");
       $("newsHeadline").textContent = evt.headline;
       $("newsDetail").textContent = evt.detail;
       $("newsFactionMeta").textContent = "🏛 主导阵营：" + evt.faction.shortName + " · " + evt.faction.name;
@@ -2409,12 +2446,13 @@
     list.innerHTML = "";
     const eventsReversed = [...S.dailyEvents].reverse();
     for (const evt of eventsReversed){
+      const isCatastrophic = evt.severity === "CATASTROPHIC";
       const item = document.createElement("div");
-      item.className = "news-history-item" + (evt.isBlackSwan ? " blackswan" : "");
+      item.className = "news-history-item" + (evt.isBlackSwan ? " blackswan" : "") + (isCatastrophic ? " catastrophic" : "");
       item.innerHTML =
         '<div class="news-history-head" style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:11px;">' +
           '<span class="news-history-time" style="color:var(--faint);font-family:var(--mono);">第 ' + evt.day + ' 天 ' + evt.time + '</span>' +
-          '<span class="news-history-type" style="padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);">' + (evt.isBlackSwan ? '🚨 黑天鹅' : '📢 要闻') + '</span>' +
+          '<span class="news-history-type" style="padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);">' + (isCatastrophic ? '☠️ 史诗灾难' : (evt.isBlackSwan ? '🚨 黑天鹅' : '📢 要闻')) + '</span>' +
           '<span class="news-history-faction" style="color:var(--blue);">🏛 ' + evt.faction.shortName + '</span>' +
           '<span class="news-history-impact ' + (evt.marketShock >= 0 ? 'up' : 'down') + '">大盘 ' + fmtPct(evt.marketShock * 100) + '</span>' +
         '</div>' +
@@ -3079,12 +3117,13 @@
       } else {
         eventsList.innerHTML = "";
         for (const evt of S.dailyEvents){
+          const isCatastrophic = evt.severity === "CATASTROPHIC";
           const item = document.createElement("div");
-          item.className = "settle-event-item" + (evt.isBlackSwan ? " blackswan" : "");
+          item.className = "settle-event-item" + (evt.isBlackSwan ? " blackswan" : "") + (isCatastrophic ? " catastrophic" : "");
           item.innerHTML =
             '<div class="settle-event-head" style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:11px;">' +
               '<span class="settle-event-day" style="color:var(--faint);font-family:var(--mono);">第 ' + evt.day + ' 天 (' + evt.date + ' ' + evt.time + ')</span>' +
-              '<span class="settle-event-type" style="padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);">' + (evt.isBlackSwan ? '🚨 黑天鹅' : '📢 重大事件') + '</span>' +
+              '<span class="settle-event-type" style="padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);">' + (isCatastrophic ? '☠️ 史诗灾难黑天鹅' : (evt.isBlackSwan ? '🚨 黑天鹅' : '📢 重大事件')) + '</span>' +
               '<span class="settle-event-faction" style="color:var(--blue);">🏛 ' + evt.faction.shortName + '</span>' +
               '<span class="settle-event-impact ' + (evt.marketShock >= 0 ? 'up' : 'down') + '">大盘 ' + fmtPct(evt.marketShock * 100) + '</span>' +
             '</div>' +

@@ -590,6 +590,24 @@
       sentimentDelta: -22
     },
     {
+      id: "SWISS_FRANC_FLASH_CRASH",
+      name: "突发闪电弃守汇率平价底线（瑞郎式海啸）",
+      isBlackSwan: true,
+      category: "BLACK_SWAN",
+      severity: "CATASTROPHIC",
+      faction: FACTIONS.FOREIGN_CAPITAL,
+      probabilityWeight: 0.15, // 最低概率权重！普通黑天鹅为 5~8，此事件仅 0.15，是全库发生概率最低的传奇级黑天鹅（约占黑天鹅总事件的 0.4%）
+      triggerTimeWindow: { startHour: 10, startMin: 28, endHour: 10, endMin: 35 },
+      timeDesc: "早盘 10:30",
+      headlineTemplate: "【☠️ 史诗级黑天鹅 · 瑞郎式海啸】突发闪电撕毁平价底线承诺！全球百亿对冲基金瞬间穿仓倒闭，金融衍生品流动性彻底蒸发！",
+      detailTemplate: "{time}，海外核心央行在事前反复誓言兜底的背景下，毫无征兆突发宣布取消长期汇率平价承诺并实施深度负利率！全市场流动性在数十秒内彻底归零，买卖挂单断崖熔断。多家知名跨国百亿对冲基金净值直接归零清盘，头部券商遭遇毁灭性穿仓坏账。全市场流动性枯竭引发无差别核按钮踩踏，高杠杆多头遭遇毁灭性强平！",
+      marketShock: -0.065, // 全库最强冲击：大盘基准收益瞬间暴跌 -6.5%
+      sectorMultiplier: 1.45,
+      volatilityMult: 4.0, // 波动率骤增 4 倍
+      targetSector: "券商", // 核心重灾区：券商金融遭遇穿仓挤兑与流动性危机
+      sentimentDelta: -55 // 市场情绪直接砸向个位数历史极寒冰点
+    },
+    {
       id: "NATIONAL_TEAM_INTERVENTION",
       name: "国家级平准基金千亿托底救市",
       isBlackSwan: false,
