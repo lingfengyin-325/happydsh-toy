@@ -1169,7 +1169,7 @@
   };
 
   const QuantFactorEngine = {
-    computeFactors(history, stockInfo) {
+    computeFactors(history, stockInfo, options = {}) {
       const len = history ? history.length : 0;
       if (len < 5) {
         return {
@@ -1189,6 +1189,10 @@
       const momentum10 = c10 > 0 ? (prevClose - c10) / c10 : 0;
       const momentum20 = c20 > 0 ? (prevClose - c20) / c20 : 0;
 
+      // 动量饱和映射 (使用 tanh 函数，防止极端自激膨胀)
+      const satMom5 = Math.tanh(momentum5 / 0.08);
+      const satMom10 = Math.tanh(momentum10 / 0.12);
+
       const ma5 = this.calculateSMA(history, 5);
       const ma10 = this.calculateSMA(history, 10);
       const ma20 = this.calculateSMA(history, 20);
@@ -1198,24 +1202,82 @@
       else if (ma5 > ma20) maCrossScore = 0.4;
       else maCrossScore = -0.4;
 
+      // 因子2: 连涨/连跌动能衰竭与获利了结抛压 (Exhaustion & Profit-Taking Drag)
+      let upStreak = 0;
+      let downStreak = 0;
+      for (let i = len - 1; i >= Math.max(0, len - 6); i--) {
+        const cur = history[i];
+        const p = history[i - 1];
+        if (!p) break;
+        if (cur.close > p.close) {
+          if (downStreak > 0) break;
+          upStreak++;
+        } else if (cur.close < p.close) {
+          if (upStreak > 0) break;
+          downStreak++;
+        } else {
+          break;
+        }
+      }
+
+      let exhaustionDrag = 0;
+      if (upStreak >= 2 || momentum5 > 0.05) {
+        // 连涨后获利盘丰厚，浮盈筹码抛售兑现意愿增强（涨多了就是最大的利空）
+        const streakFactor = Math.min(4, upStreak);
+        const overhang = Math.max(0, momentum5 - 0.04);
+        exhaustionDrag = - (streakFactor * 0.007 + overhang * 0.40);
+      } else if (downStreak >= 2 || momentum5 < -0.05) {
+        // 连续下挫后杀跌动能衰竭，超跌反弹与抄底盘介入
+        const streakFactor = Math.min(4, downStreak);
+        const deepDrop = Math.max(0, -momentum5 - 0.04);
+        exhaustionDrag = (streakFactor * 0.006 + deepDrop * 0.35);
+      }
+
+      // 因子3: 均值回归反转因子 (Reversal / 20日BIAS乖离率)
       const bias20 = ma20 > 0 ? (prevClose - ma20) / ma20 : 0;
+      let reversalAlpha = 0;
+      if (bias20 > 0.02) {
+        reversalAlpha = - (bias20 - 0.02) * 1.5;
+        if (bias20 > 0.05) reversalAlpha -= (bias20 - 0.05) * 2.2;
+      } else if (bias20 < -0.02) {
+        reversalAlpha = (-bias20 - 0.02) * 1.3;
+        if (bias20 < -0.05) reversalAlpha += (-bias20 - 0.05) * 1.8;
+      }
+
+      // 因子4: 全市场横截面高低切换 (Cross-Sectional Rotation)
+      let rotationAlpha = 0;
+      if (typeof options.crossSectionalRank === "number") {
+        const rank = clamp(options.crossSectionalRank, 0, 1);
+        if (rank > 0.70) {
+          rotationAlpha = - (rank - 0.70) * 0.035;
+        } else if (rank < 0.30) {
+          rotationAlpha = (0.30 - rank) * 0.035;
+        }
+      }
+
+      // 因子5: 量比异动因子 (Volume Spike / Volume Ratio)
       const avgVol5 = this.calculateAvgVolume(history, 5);
       const volumeRatio = avgVol5 > 0 ? latest.vol / avgVol5 : 1.0;
+      let volumeAlpha = 0;
+      if (momentum5 > 0.03 && volumeRatio < 0.75) volumeAlpha = -0.010;
+      else if (momentum5 > 0.02 && volumeRatio > 1.3) volumeAlpha = 0.008;
+      else if (momentum5 < -0.03 && volumeRatio > 1.5) volumeAlpha = 0.008;
+
+      // 因子6: 真实波幅与波动率因子 (ATR10 Normalized)
       const atr10 = this.calculateATR(history, 10);
       const atr10Normalized = prevClose > 0 ? (atr10 / prevClose) * 100 : 2.0;
+
+      // 因子7: Beta 与弹性暴露
       const beta = stockInfo.beta != null ? stockInfo.beta : (stockInfo.vol || 1.0);
 
-      const momentumAlpha = momentum5 * 1.6 + momentum10 * 0.8 + maCrossScore * 0.02;
-      let reversalAlpha = 0;
-      if (bias20 > 0.06) reversalAlpha = - (bias20 - 0.06) * 1.5;
-      else if (bias20 < -0.06) reversalAlpha = (-bias20 - 0.06) * 1.3;
+      // 合成 Alpha 综合评分:
+      const momentumTerm = satMom5 * 0.025 + satMom10 * 0.012 + maCrossScore * 0.006;
+      const compositeScore = clamp(
+        momentumTerm + exhaustionDrag + reversalAlpha + rotationAlpha + volumeAlpha,
+        -0.045,
+        0.045
+      );
 
-      let volumeAlpha = 0;
-      if (momentum5 > 0.04 && volumeRatio < 0.75) volumeAlpha = -0.012;
-      else if (momentum5 > 0.03 && volumeRatio > 1.4) volumeAlpha = 0.010;
-      else if (momentum5 < -0.04 && volumeRatio > 1.6) volumeAlpha = 0.008;
-
-      const compositeScore = momentumAlpha * 0.45 + reversalAlpha * 0.40 + volumeAlpha;
       return {
         momentum5: round2(momentum5 * 100),
         momentum10: round2(momentum10 * 100),
@@ -1262,17 +1324,17 @@
       return trSum / count;
     },
     synthesizeDailyTarget(factors, benchmarkReturn, eventImpact = null, randomVal = 0) {
-      const betaContribution = benchmarkReturn * factors.beta * 0.85;
-      const alphaContribution = clamp(factors.compositeScore * 0.45, -0.065, 0.065);
+      const betaContribution = benchmarkReturn * factors.beta * 0.75;
+      const alphaContribution = clamp(factors.compositeScore * 0.40, -0.016, 0.016);
       let eventContribution = 0;
       if (eventImpact) {
         eventContribution += (eventImpact.marketShock || 0) * (factors.beta * 0.55);
         if (eventImpact.sectorShock) eventContribution += eventImpact.sectorShock;
       }
-      const noiseAmp = Math.max(0.006, (factors.atr10Normalized / 100) * 0.25);
+      const noiseAmp = Math.max(0.012, (factors.atr10Normalized / 100) * 0.65);
       const noise = randomVal * noiseAmp;
       const target = betaContribution + alphaContribution + eventContribution + noise;
-      return clamp(target, -0.095, 0.095);
+      return clamp(target, -0.098, 0.098);
     }
   };
 
@@ -1912,14 +1974,14 @@
     m.latestFactors = QuantEngine.QuantFactorEngine.computeFactors(m.data, stock);
   }
 
-  function appendStockCandle(m, parts, macroReturn = 0, eventInstance = null){
+  function appendStockCandle(m, parts, macroReturn = 0, eventInstance = null, crossSectionalRank = 0.5){
     const stock = m.stock;
     const rand = m.rng;
     const prev = m.data[m.data.length-1];
     const prevClose = prev.close;
 
-    // 1. 基于历史数据提取多因子特征 (动量ROC/均线排列/20日BIAS乖离率/量比/ATR波幅)
-    const factors = QuantEngine.QuantFactorEngine.computeFactors(m.data, stock);
+    // 1. 基于历史数据提取多因子特征 (引入动能衰竭、均值回归强化与横截面排位)
+    const factors = QuantEngine.QuantFactorEngine.computeFactors(m.data, stock, { crossSectionalRank });
     m.latestFactors = factors;
 
     // 2. 判定大盘事件冲击对该行业或个股的特定暴露
@@ -1933,8 +1995,8 @@
       };
     }
 
-    // 3. 多因子加权合成当日理论预期涨跌幅 (完全以量化因子走向决定)
-    const randomNoise = (rand() - 0.5);
+    // 3. 多因子加权合成当日理论预期涨跌幅 (信噪比恢复平衡，随机博弈范围扩大至 [-1, 1])
+    const randomNoise = (rand() - 0.5) * 2;
     let targetPct = QuantEngine.QuantFactorEngine.synthesizeDailyTarget(
       factors,
       macroReturn,
@@ -2934,8 +2996,25 @@
     S.todayMacroReturn = macroReturn;
     S.benchmark.push(S.macroState.indexLevel);
 
-    // 3. 多因子量化驱动每只标的 K 线演化
-    for (const m of S.market) appendStockCandle(m, parts, macroReturn, eventInstance);
+    // 3. 全市场横截面近期强弱排位计算 (用于高低切换与资金轮动)
+    const perfList = S.market.map((m) => {
+      const len = m.data.length;
+      const cNow = m.data[len - 1].close;
+      const cPrev5 = m.data[Math.max(0, len - 5)].close;
+      const ret5 = cPrev5 > 0 ? (cNow - cPrev5) / cPrev5 : 0;
+      return { id: m.id, ret5 };
+    });
+    perfList.sort((a, b) => a.ret5 - b.ret5);
+    const crossSectionalRanks = {};
+    perfList.forEach((item, r) => {
+      crossSectionalRanks[item.id] = perfList.length > 1 ? r / (perfList.length - 1) : 0.5;
+    });
+
+    // 4. 多因子量化驱动每只标的 K 线演化 (注入横截面排位)
+    for (const m of S.market) {
+      const rank = crossSectionalRanks[m.id] != null ? crossSectionalRanks[m.id] : 0.5;
+      appendStockCandle(m, parts, macroReturn, eventInstance, rank);
+    }
     for (const m of S.market) refreshMAs(m);
     S.nextDate = nextTradingDay(S.nextDate);
   }

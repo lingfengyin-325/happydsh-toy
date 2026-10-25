@@ -76,7 +76,7 @@
      * 计算单只股票的多维度量化因子
      * @param {Array} history K线历史数据 [{open, close, high, low, vol}, ...]
      * @param {Object} stockInfo 股票基础信息 {code, name, sector, beta, vol}
-     * @param {Object} options 附加参数
+     * @param {Object} options 附加参数 { crossSectionalRank: 0.5 }
      */
     computeFactors(history, stockInfo, options = {}) {
       const len = history ? history.length : 0;
@@ -105,6 +105,10 @@
       const momentum10 = c10 > 0 ? (prevClose - c10) / c10 : 0;
       const momentum20 = c20 > 0 ? (prevClose - c20) / c20 : 0;
 
+      // 动量饱和映射 (使用 tanh 函数，防止极端自激膨胀)
+      const satMom5 = Math.tanh(momentum5 / 0.08);
+      const satMom10 = Math.tanh(momentum10 / 0.12);
+
       // 均线多头/空头排列因子 (MA排列)
       const ma5 = this.calculateSMA(history, 5);
       const ma10 = this.calculateSMA(history, 10);
@@ -115,43 +119,89 @@
       else if (ma5 > ma20) maCrossScore = 0.4;
       else maCrossScore = -0.4;
 
-      // 因子2: 均值回归反转因子 (Reversal / 20日BIAS乖离率)
-      const bias20 = ma20 > 0 ? (prevClose - ma20) / ma20 : 0;
+      // 因子2: 连涨/连跌动能衰竭与获利了结抛压 (Exhaustion & Profit-Taking Drag)
+      let upStreak = 0;
+      let downStreak = 0;
+      for (let i = len - 1; i >= Math.max(0, len - 6); i--) {
+        const cur = history[i];
+        const p = history[i - 1];
+        if (!p) break;
+        if (cur.close > p.close) {
+          if (downStreak > 0) break;
+          upStreak++;
+        } else if (cur.close < p.close) {
+          if (upStreak > 0) break;
+          downStreak++;
+        } else {
+          break;
+        }
+      }
 
-      // 因子3: 量比异动因子 (Volume Spike / Volume Ratio)
+      let exhaustionDrag = 0;
+      if (upStreak >= 2 || momentum5 > 0.05) {
+        // 连涨后获利盘丰厚，浮盈筹码抛售兑现意愿增强（涨多了就是最大的利空）
+        const streakFactor = Math.min(4, upStreak);
+        const overhang = Math.max(0, momentum5 - 0.04);
+        exhaustionDrag = - (streakFactor * 0.007 + overhang * 0.40);
+      } else if (downStreak >= 2 || momentum5 < -0.05) {
+        // 连续下挫后杀跌动能衰竭，超跌反弹与抄底盘介入
+        const streakFactor = Math.min(4, downStreak);
+        const deepDrop = Math.max(0, -momentum5 - 0.04);
+        exhaustionDrag = (streakFactor * 0.006 + deepDrop * 0.35);
+      }
+
+      // 因子3: 均值回归反转因子 (Reversal / 20日BIAS乖离率)
+      // 只要偏离均线即线性产生回归拉力，偏离越大拉力呈加速上升
+      const bias20 = ma20 > 0 ? (prevClose - ma20) / ma20 : 0;
+      let reversalAlpha = 0;
+      if (bias20 > 0.02) {
+        reversalAlpha = - (bias20 - 0.02) * 1.5;
+        if (bias20 > 0.05) reversalAlpha -= (bias20 - 0.05) * 2.2;
+      } else if (bias20 < -0.02) {
+        reversalAlpha = (-bias20 - 0.02) * 1.3;
+        if (bias20 < -0.05) reversalAlpha += (-bias20 - 0.05) * 1.8;
+      }
+
+      // 因子4: 全市场横截面高低切换 (Cross-Sectional Rotation)
+      let rotationAlpha = 0;
+      if (typeof options.crossSectionalRank === "number") {
+        const rank = clamp(options.crossSectionalRank, 0, 1);
+        if (rank > 0.70) {
+          // 处于全市场近期涨幅前30%的高位股，资金开始分流流出
+          rotationAlpha = - (rank - 0.70) * 0.035;
+        } else if (rank < 0.30) {
+          // 处于全市场近期跌幅前30%的低位超跌洼地股，承接高低切换的轮动资金
+          rotationAlpha = (0.30 - rank) * 0.035;
+        }
+      }
+
+      // 因子5: 量比异动因子 (Volume Spike / Volume Ratio)
       const avgVol5 = this.calculateAvgVolume(history, 5);
       const volumeRatio = avgVol5 > 0 ? latest.vol / avgVol5 : 1.0;
+      let volumeAlpha = 0;
+      if (momentum5 > 0.03 && volumeRatio < 0.75) {
+        volumeAlpha = -0.010; // 缩量上涨动能衰竭
+      } else if (momentum5 > 0.02 && volumeRatio > 1.3) {
+        volumeAlpha = 0.008; // 放量突破有效
+      } else if (momentum5 < -0.03 && volumeRatio > 1.5) {
+        volumeAlpha = 0.008; // 恐慌盘涌出，短线企稳信号
+      }
 
-      // 因子4: 真实波幅与波动率因子 (ATR10 Normalized)
+      // 因子6: 真实波幅与波动率因子 (ATR10 Normalized)
       const atr10 = this.calculateATR(history, 10);
       const atr10Normalized = prevClose > 0 ? (atr10 / prevClose) * 100 : 2.0;
 
-      // 因子5: Beta 与弹性暴露
+      // 因子7: Beta 与弹性暴露
       const beta = stockInfo.beta != null ? stockInfo.beta : (stockInfo.vol || 1.0);
 
       // 合成 Alpha 综合评分:
-      // 动量项: 顺势推动
-      const momentumAlpha = momentum5 * 1.6 + momentum10 * 0.8 + maCrossScore * 0.02;
-
-      // 均值回归反转项: 当短期涨幅或跌幅偏离均线过远时，产生强大的理性纠偏拉力
-      let reversalAlpha = 0;
-      if (bias20 > 0.06) {
-        reversalAlpha = - (bias20 - 0.06) * 1.5; // 超买回踩压力
-      } else if (bias20 < -0.06) {
-        reversalAlpha = (-bias20 - 0.06) * 1.3; // 超跌估值修复动力
-      }
-
-      // 量价背离修正:
-      let volumeAlpha = 0;
-      if (momentum5 > 0.04 && volumeRatio < 0.75) {
-        volumeAlpha = -0.012; // 缩量上涨易衰竭
-      } else if (momentum5 > 0.03 && volumeRatio > 1.4) {
-        volumeAlpha = 0.010; // 放量突破，趋势延续
-      } else if (momentum5 < -0.04 && volumeRatio > 1.6) {
-        volumeAlpha = 0.008; // 恐慌盘涌出，短线见底信号
-      }
-
-      const compositeScore = momentumAlpha * 0.45 + reversalAlpha * 0.40 + volumeAlpha;
+      // 动量顺势推动 + 动能衰竭抛压 + 均值回归反转 + 高低切换轮动 + 量价因子
+      const momentumTerm = satMom5 * 0.025 + satMom10 * 0.012 + maCrossScore * 0.006;
+      const compositeScore = clamp(
+        momentumTerm + exhaustionDrag + reversalAlpha + rotationAlpha + volumeAlpha,
+        -0.045,
+        0.045
+      );
 
       return {
         momentum5: round2(momentum5 * 100),
@@ -207,10 +257,11 @@
      */
     synthesizeDailyTarget(factors, benchmarkReturn, eventImpact = null, randomVal = 0) {
       // 1. Beta 传导大盘走势
-      const betaContribution = benchmarkReturn * factors.beta * 0.85;
+      const betaContribution = benchmarkReturn * factors.beta * 0.75;
 
-      // 2. 特质 Alpha 贡献 (动量、均值回归、量价)
-      const alphaContribution = clamp(factors.compositeScore * 0.45, -0.065, 0.065);
+      // 2. 特质 Alpha 贡献 (动量、衰竭、反转、轮动等综合评分)
+      // 限制特质 Alpha 单日贡献在合理区间 [-0.016, 0.016] (±1.6%)，杜绝算法直接把个股推向涨跌停
+      const alphaContribution = clamp(factors.compositeScore * 0.40, -0.016, 0.016);
 
       // 3. 事件冲击
       let eventContribution = 0;
@@ -221,12 +272,13 @@
         }
       }
 
-      // 4. 波动率噪声 (由 ATR 真实波幅决定日内震荡空间)
-      const noiseAmp = Math.max(0.006, (factors.atr10Normalized / 100) * 0.25);
+      // 4. 波动率特质噪声 (由 ATR 真实波幅决定日内震荡博弈空间)
+      // 让特质噪声幅度达到 ±1.2% ~ ±2.0%，确保信噪比合理，杜绝单边直线行情
+      const noiseAmp = Math.max(0.012, (factors.atr10Normalized / 100) * 0.65);
       const noise = randomVal * noiseAmp;
 
       const target = betaContribution + alphaContribution + eventContribution + noise;
-      return clamp(target, -0.095, 0.095);
+      return clamp(target, -0.098, 0.098);
     }
   };
 

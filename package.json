@@ -4,7 +4,7 @@
   "description": "基于量化多因子模型与A股控盘机制的股市模拟器",
   "main": "quant-engine.js",
   "scripts": {
-    "test": "node tests/quant-engine.test.js && node tests/simulation.test.js"
+    "test": "node tests/quant-engine.test.js && node tests/momentum-decay.test.js && node tests/simulation.test.js"
   },
   "keywords": [
     "quantitative-trading",
